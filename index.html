@@ -497,40 +497,65 @@ function closeInvite(){
     document.getElementById('detailBox').style.display = "none";
 }
 
-// ====================== 留言板（本地存储，本机刷新不消失） ======================
-function getMessages(){
-    var data = localStorage.getItem("qianjuMsg");
-    return data ? JSON.parse(data) : [];
+// ====================== 留言板（全网共享，CloudBase PostgreSQL） ======================
+var API_BASE = "https://qq368200-d2ghyhjy46fd42b42.api.tcloudbasegateway.com/v1/rdb/rest/messages";
+var AUTH_URL = "https://qq368200-d2ghyhjy46fd42b42.api.tcloudbasegateway.com/auth/v1/signin/anonymously";
+var deviceId = localStorage.getItem("qianjuDeviceId");
+if(!deviceId){ deviceId = "web-" + Date.now() + "-" + Math.random().toString(36).slice(2); localStorage.setItem("qianjuDeviceId", deviceId); }
+var accessToken = "";
+
+async function initToken(){
+    try{
+        var res = await fetch(AUTH_URL, {method:"POST", headers:{"Content-Type":"application/json","X-Device-Id":deviceId}, body:"{}"});
+        var data = await res.json();
+        accessToken = data.access_token;
+    }catch(e){ console.error("登录失败", e); }
 }
-function renderMsg(){
+
+async function loadMessages(){
+    if(!accessToken) await initToken();
+    try{
+        var res = await fetch(API_BASE + "?select=*&order=created_at.desc&limit=50", {headers:{"Authorization":"Bearer "+accessToken,"X-Device-Id":deviceId}});
+        var msgs = await res.json();
+        renderMsg(msgs);
+    }catch(e){ console.error("加载留言失败", e); document.getElementById("msgList").innerHTML = '<div class="load-tip">留言加载中...</div>'; }
+}
+
+function escapeHtml(s){
+    return String(s==null?"":s).replace(/[&<>"']/g, function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});
+}
+
+function renderMsg(msgs){
     var listDom = document.getElementById("msgList");
-    var msgs = getMessages();
-    if(msgs.length === 0){
+    if(!msgs || msgs.length === 0){
         listDom.innerHTML = '<div class="load-tip">暂时还没有祝福，期待您的留言</div>';
         return;
     }
     var html = "";
-    for(var i=msgs.length-1;i>=0;i--){
-        html += '<div class="msg-item"><span class="msg-name">' + msgs[i].name + '</span>：' + msgs[i].content + '</div>';
-    }
+    msgs.forEach(function(m){
+        html += '<div class="msg-item"><span class="msg-name">' + escapeHtml(m.name) + '</span>：' + escapeHtml(m.content) + '</div>';
+    });
     listDom.innerHTML = html;
 }
-function submitMessage(){
+
+async function submitMessage(){
     var name = document.getElementById("msgName").value.trim();
     var content = document.getElementById("msgContent").value.trim();
     if(!name || !content){
         alert("请填写姓名和祝福语！");
         return;
     }
-    var arr = getMessages();
-    arr.push({name:name, content:content});
-    localStorage.setItem("qianjuMsg", JSON.stringify(arr));
-    document.getElementById("msgName").value = "";
-    document.getElementById("msgContent").value = "";
-    renderMsg();
-    alert("祝福已提交，主人能看到您的留言！");
+    if(!accessToken) await initToken();
+    try{
+        await fetch(API_BASE, {method:"POST", headers:{"Authorization":"Bearer "+accessToken,"X-Device-Id":deviceId,"Content-Type":"application/json","Prefer":"return=representation"}, body:JSON.stringify({name:name, content:content})});
+        document.getElementById("msgName").value = "";
+        document.getElementById("msgContent").value = "";
+        alert("祝福已提交！主人能看到您的留言啦~");
+        loadMessages();
+    }catch(e){ alert("提交失败，请检查网络后重试"); console.error(e); }
 }
-renderMsg();
+
+loadMessages();
 </script>
 </body>
 </html>
